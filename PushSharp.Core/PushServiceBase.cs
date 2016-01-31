@@ -115,10 +115,7 @@ namespace PushSharp.Core
 
 			if (this.ServiceSettings.MaxNotificationRequeues < 0 ||
 			    notification.QueuedCount <= this.ServiceSettings.MaxNotificationRequeues)
-			{ 
-                // Increment our counter
-                Interlocked.Increment(ref trackedNotificationCount);
-
+			{
                 //Reset Enqueued time in case this is a requeue
 				notification.EnqueuedTimestamp = DateTime.UtcNow;
 
@@ -291,7 +288,7 @@ namespace PushSharp.Core
 						}
                         while (ChannelCount < ServiceSettings.Channels && !this.cancelTokenSource.IsCancellationRequested
                             && (DateTime.UtcNow - lastNotificationQueueTime) <= ServiceSettings.IdleTimeout
-                            && Interlocked.Read(ref trackedNotificationCount) > 0)
+                            && (Interlocked.Read(ref trackedNotificationCount) > 0 || QueueLength > 0))
 						{
 							Log.Info("{0} -> Creating Channel", this);
 							ScaleChannels(ChannelScaleAction.Create);
@@ -450,6 +447,10 @@ namespace PushSharp.Core
 					Thread.Sleep(100);
 					continue;
 				}
+                else
+                {
+                    Interlocked.Increment(ref trackedNotificationCount);
+                }
 
                 ManualResetEvent waitForNotification = null;
 
@@ -478,8 +479,6 @@ namespace PushSharp.Core
 
 				channel.SendNotification(notification, (sender, result) =>
 					{
-						Interlocked.Decrement(ref trackedNotificationCount);
-                        
 						var sendTime = DateTime.UtcNow - sendStart;
 
                         lock (sendTimeMeasurementsLock)
@@ -547,8 +546,6 @@ namespace PushSharp.Core
 
                 if (waitForNotification != null && !waitForNotification.WaitOne(ServiceSettings.NotificationSendTimeout))
                 {
-					Interlocked.Decrement(ref trackedNotificationCount);
-
 					Log.Info("Notification send timeout");
 
 					var evt = this.OnNotificationFailed;
@@ -561,6 +558,8 @@ namespace PushSharp.Core
                     waitForNotification.Close();
                     waitForNotification = null;
                 }
+
+                Interlocked.Decrement(ref trackedNotificationCount);
 			}
 
 			channel.Dispose();
